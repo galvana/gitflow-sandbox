@@ -1,0 +1,15 @@
+[project]
+name = "gitflow-sandbox"
+version = "0.0.0"
+description = "Sandbox to validate gitflow automation + changelog + docker publish"
+requires-python = ">=3.13"
+
+# setuptools-scm derives the version from the git tag, mirroring fidesplus.
+[build-system]
+requires = ["setuptools>=61", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+
+[dependency-groups]
+dev = ["nox", "pyyaml", "setuptools-scm>=8"]
