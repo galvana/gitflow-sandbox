@@ -4,3 +4,4 @@ stabilization fix
 changelog demo feature
 v2.3 feature
 critical hotfix
+hotfix 2.3.2 fix
