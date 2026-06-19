@@ -1,0 +1,3 @@
+type: Changed
+description: Change default page size to 50
+pr: 22
