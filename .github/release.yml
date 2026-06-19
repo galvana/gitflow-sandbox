@@ -1,0 +1,9 @@
+# Configures GitHub's auto-generated release notes ("What's Changed").
+# Omit the gitflow-generated PRs (release->main tracking + back-merges); keep
+# the human feature/fix PRs. Matches the labels the Start/Finish workflows apply.
+changelog:
+  exclude:
+    labels:
+      - release
+      - hotfix
+      - backmerge
