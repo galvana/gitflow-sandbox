@@ -3,7 +3,18 @@
 All notable changes are compiled here from `changelog/` fragments at release time
 by `nox -s "changelog(write)" -- --release VERSION`.
 
-## [Unreleased](https://github.com/galvana/gitflow-sandbox/compare/2.3.2..main)
+## [Unreleased](https://github.com/galvana/gitflow-sandbox/compare/2.4.0..main)
+
+## [2.4.0](https://github.com/galvana/gitflow-sandbox/compare/2.3.2..2.4.0)
+
+### Added
+- Add bulk export endpoint [#20](https://github.com/galvana/gitflow-sandbox/pull/20)
+
+### Changed
+- Change default page size to 50 [#22](https://github.com/galvana/gitflow-sandbox/pull/22)
+
+### Fixed
+- Fix pagination off-by-one [#21](https://github.com/galvana/gitflow-sandbox/pull/21)
 
 ## [2.3.2](https://github.com/galvana/gitflow-sandbox/compare/2.3.1..2.3.2)
 
