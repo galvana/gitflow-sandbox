@@ -1,0 +1,127 @@
+name: Check Changelog Entry
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+      - dev
+
+env:
+  GHA_CACHE_KEY_PREFIX: monorepo
+  CHECKOUT_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || (github.event_name == 'merge_group' && github.event.merge_group.head_sha || github.sha) }}
+jobs:
+  check-changelog:
+    runs-on: ubuntu-latest
+    # Exempt gitflow-generated PRs: release/* and hotfix/* (release->main, the
+    # stabilization branch PRs) and the auto back-merges. Their fragments are
+    # compiled into CHANGELOG.md + deleted at Finish, so they carry no fragment.
+    if: >-
+      !startsWith(github.event.pull_request.head.ref, 'release/') &&
+      !startsWith(github.event.pull_request.head.ref, 'hotfix/') &&
+      !contains(github.event.pull_request.labels.*.name, 'backmerge')
+    steps:
+      - name: Check for changelog entry
+        id: check-changelog-files
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+
+            // Fetch all files changed in the PR
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+            });
+
+            // Check for changelog entry files (excluding TEMPLATE.yaml)
+            const changelogFiles = files.filter(file => {
+              const filename = file.filename;
+              // Check if file is in changelog/ directory
+              if (!filename.startsWith('changelog/')) {
+                return false;
+              }
+              // Check if it's a YAML file
+              if (!filename.endsWith('.yaml') && !filename.endsWith('.yml')) {
+                return false;
+              }
+              // Exclude TEMPLATE.yaml
+              if (filename === 'changelog/TEMPLATE.yaml' || filename === 'changelog/TEMPLATE.yml') {
+                return false;
+              }
+              // Only count added or modified files (not deleted)
+              return file.status === 'added' || file.status === 'modified';
+            });
+
+            if (changelogFiles.length === 0) {
+              core.setFailed(
+                '❌ No changelog entry file found!\n\n' +
+                'Please add a changelog entry file in the changelog/ directory.\n' +
+                'See changelog/README.md for instructions on creating changelog entries.\n'
+              );
+            }
+
+            const prPrefix = `changelog/${pr.number}-`;
+            const ownChangelogFiles = changelogFiles.filter(
+              (file) => file.filename.startsWith(prPrefix)
+            );
+
+            if (ownChangelogFiles.length === 0) {
+              core.setFailed(
+                `❌ No changelog entry for this PR (#${pr.number})!\n\n` +
+                `Add changelog/${pr.number}-<short-description>.yaml with pr: ${pr.number}.\n` +
+                'Other changelog files in the PR (e.g. from a merge) are validated separately.\n'
+              );
+            } else {
+              const fileNames = changelogFiles.map(f => f.filename).join(', ');
+              console.log(`✅ Found changelog entry file(s): ${fileNames}`);
+              console.log(
+                `✅ PR #${pr.number} fragment(s): ${ownChangelogFiles.map(f => f.filename).join(', ')}`
+              );
+              // Set output for validation step
+              core.setOutput('changelog_files', fileNames);
+              core.setOutput('pr_number', pr.number.toString());
+            }
+
+      - name: Checkout repository
+        if: success()
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Set up Python
+        if: success()
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        if: success()
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-suffix: ${{ env.GHA_CACHE_KEY_PREFIX }}
+
+      - name: Cache Nox virtual environment
+        if: success()
+        uses: actions/cache@v5
+        with:
+          path: .nox/
+          key: ${{ runner.os }}-${{ env.GHA_CACHE_KEY_PREFIX }}-nox-changelog-3.13-${{ hashFiles('noxfiles/changelog_nox.py') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.GHA_CACHE_KEY_PREFIX }}-nox-changelog-3.13-
+
+      - name: Install Dev Requirements
+        if: success()
+        run: uv sync --all-groups
+
+      - name: Validate changelog entries
+        if: success()
+        run: |
+          uv run nox -s "changelog(validate)" -- --files "${{ steps.check-changelog-files.outputs.changelog_files }}" --pr-number "${{ steps.check-changelog-files.outputs.pr_number }}"

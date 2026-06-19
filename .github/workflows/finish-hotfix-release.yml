@@ -35,6 +35,14 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.app.outputs.token }}
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+
       - name: Resolve version + branch
         id: ver
         env:
@@ -59,6 +67,30 @@ jobs:
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "branch=$B" >> "$GITHUB_OUTPUT"
           echo "Finishing hotfix $V"
+
+      - name: Compile changelog on hotfix branch
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          V: ${{ steps.ver.outputs.version }}
+          B: ${{ steps.ver.outputs.branch }}
+        run: |
+          set -euo pipefail
+          merged=$(gh pr list --head "$B" --base main --state merged --json number -q '.[0].number' || true)
+          if [[ -n "$merged" ]]; then echo "already merged; skipping changelog compile."; exit 0; fi
+
+          git fetch -q origin "$B"
+          git checkout -q -B "$B" "origin/$B"
+          uv sync --all-groups
+          uv run nox -s "changelog(write)" -- --release "$V"
+          if git diff --quiet; then
+            echo "no changelog changes to commit"
+          else
+            git config user.name "gitflow-bot"
+            git config user.email "gitflow-bot@users.noreply.github.com"
+            git commit -qam "chore: compile changelog for $V"
+            git push origin "HEAD:$B"
+            echo "compiled changelog + pushed to $B"
+          fi
 
       - name: Merge hotfix -> main (gated, idempotent, squash)
         env:
@@ -86,9 +118,19 @@ jobs:
           if [[ "$review" != "APPROVED" && -n "$review" ]]; then  # SANDBOX temp-relax: pass when no review required
             echo "::error::hotfix -> main PR #$PR not approved (state: ${review:-none})"; exit 1
           fi
-          fails=$(gh pr checks "$PR" --json bucket -q '[.[] | select(.bucket != "pass" and .bucket != "skipping")] | length')
-          if [[ "$fails" != "0" ]]; then
-            echo "::error::hotfix -> main PR #$PR has $fails check(s) not green"; exit 1
+          # Poll until checks settle (the changelog compile pushed a commit).
+          for _ in $(seq 1 30); do
+            failed=$(gh pr checks "$PR" --json bucket -q '[.[] | select(.bucket == "fail" or .bucket == "cancel")] | length' || true)
+            if [[ "${failed:-0}" != "0" ]]; then
+              echo "::error::hotfix -> main PR #$PR has ${failed} failing check(s)"; exit 1
+            fi
+            pending=$(gh pr checks "$PR" --json bucket -q '[.[] | select(.bucket != "pass" and .bucket != "skipping")] | length' || true)
+            [[ "${pending:-0}" == "0" ]] && break
+            sleep 10
+          done
+          pending=$(gh pr checks "$PR" --json bucket -q '[.[] | select(.bucket != "pass" and .bucket != "skipping")] | length' || true)
+          if [[ "${pending:-1}" != "0" ]]; then
+            echo "::error::hotfix -> main PR #$PR checks not green after wait"; exit 1
           fi
 
           # App is in the main ruleset bypass list, so this direct merge is allowed.
